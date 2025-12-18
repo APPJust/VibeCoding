@@ -1,0 +1,238 @@
+<html lang="zh-TW">
+<head>
+    <!--
+        設定文件類型為 HTML5。
+        指定語系為繁體中文 (zh-TW)。
+    -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!--
+        設定CORS相關標頭，允許跨來源請求。
+        在此範例中是預設允許所有來源。
+    -->
+    <meta http-equiv="Access-Control-Allow-Headers" content="Origin, X-Requested-With, Content-Type, Accept">
+    <meta http-equiv="Access-Control-Allow-Methods" content="GET,POST,PUT,DELETE,OPTIONS">
+    <meta http-equiv="Access-Control-Allow-Origin" content="*">
+
+    <title>Webduino MQTT主控台</title>
+
+    <!-- 使用 Bootstrap CSS 以獲得現成的響應式頁面設計及美觀樣式 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+
+    <!-- 引入 Font Awesome 圖示庫，以使用各種 icon (e.g. 狀態顯示) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+
+    <!-- 引入所需之程式庫 (jQuery、Webduino、MQTT Client 等) -->
+    <script src="https://blocklypro.webduino.io/components/jquery/dist/jquery.min.js"></script>
+    <script src="https://blocklypro.webduino.io/dist/lib/webduino-all-0.4.20.min.js"></script>
+    <script src="https://blocklypro.webduino.io/dist/webduino-blockly.min.js"></script>
+    <script src="https://blocklypro.webduino.io/dist/lib/firebase.min.js"></script>
+    <script src="https://blocklypro.webduino.io/dist/lib/runtime.min.js"></script>
+    <script src="https://blocklypro.webduino.io/node_modules/webduino-module-mqtt/mqttClient.min.js"></script>
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #c3e0e5, #ffffff);
+            font-family: 'Noto Sans TC', sans-serif;
+            padding: 20px;
+        }
+        .card {
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .status-bar {
+            font-size: 0.9em;
+            color: #666;
+        }
+        #receive {
+            font-size: 1.1rem;
+            white-space: pre-wrap; 
+        }
+        .form-check-label {
+            user-select: none;
+        }
+        .title {
+            color: #2c7d6a;
+            font-weight: 700;
+        }
+        .divider {
+            height: 1px;
+            background-color: #ddd;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1 class="mb-4 text-center title">Webduino MQTT 控制台(by Chen-Wei Lee)</h1>
+    <div class="mb-3 text-center status-bar" id="statusBar"><span class="text-success"><i class="fa fa-check-circle"></i> mqtt1.webduino.io 已連線成功</span></div>
+    <div class="card p-4">
+        <h5 class="mb-3">發送訊息</h5>
+        <form class="row g-3">
+            <div class="col-md-6">
+                <label for="sendTopic" class="form-label">傳送主題 (Send Topic)</label>
+                <input type="text" class="form-control" id="sendTopic" placeholder="請輸入傳送主題">
+            </div>
+            <div class="col-md-6">
+                <label for="message" class="form-label">訊息內容 (Message)</label>
+                <input type="text" class="form-control" id="message" placeholder="請輸入訊息內容">
+            </div>
+            <div class="col-12 text-end">
+                <button type="button" class="btn btn-success" onclick="sendMessage();">
+                    <i class="fa fa-paper-plane"></i> 送出
+                </button>
+                <button type="button" class="btn btn-warning" onclick="sendOnMessage();">
+                    傳送 on
+                </button>
+                <button type="button" class="btn btn-info" onclick="sendOffMessage();">
+                    傳送 off
+                </button>
+            </div>
+        </form>
+
+        <div class="divider"></div>
+
+        <h5 class="mb-3">接收訊息</h5>
+        <form class="row g-3">
+            <div class="col-md-6">
+                <label for="getTopic" class="form-label">接收主題 (Get Topic)</label>
+                <input type="text" class="form-control" id="getTopic" placeholder="請輸入要接收的主題">
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="clear" checked>
+                    <label class="form-check-label ms-1" for="clear">
+                        清除上次接收訊息
+                    </label>
+                </div>
+            </div>
+        </form>
+
+        <div class="divider"></div>
+
+        <h5 class="mb-3">使用者設定</h5>
+        <form class="row g-3">
+            <div class="col-md-6 d-flex align-items-end">
+                <input type="text" class="form-control me-2" id="ID" placeholder="使用者ID（選填）">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="chkid" checked>
+                    <label class="form-check-label ms-1" for="chkid">加入ID至訊息</label>
+                </div>
+            </div>
+        </form>
+
+        <div class="divider"></div>
+
+        <h5 class="mb-3">接收區</h5>
+        <div id="receive" class="p-3 bg-light border rounded" style="min-height:100px;max-height:300px;overflow:auto;"></div>
+    </div>
+</div>
+
+<script>
+    var webduinoBroadcastor;   
+    var sendTopic = document.getElementById('sendTopic');
+    var message = document.getElementById('message');
+    var getTopic = document.getElementById('getTopic');
+    var clear = document.getElementById('clear');
+    var ID = document.getElementById('ID');
+    var chkid = document.getElementById('chkid');
+    var receive = document.getElementById('receive');
+    var statusBar = document.getElementById('statusBar');
+    var msg = "";
+
+    (async function () {
+        try {
+            webduinoBroadcastor = new webduino.module.mqttClient();
+            await webduinoBroadcastor.connect({ server: 'wss://mqtt1.webduino.io/mqtt' });
+            statusBar.innerHTML = '<span class="text-success"><i class="fa fa-check-circle"></i> mqtt1.webduino.io 已連線成功</span>';
+        } catch (e) {
+            statusBar.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle"></i> mqtt1.webduino.io 連線失敗，請重新整理</span>';
+        }
+    }());
+
+    async function sendMessage() {
+        if (sendTopic.value === "" || message.value === "") {
+            appendMessage("請輸入傳送主題與訊息內容!", true);
+            return;
+        }
+
+        if (chkid.checked && ID.value !== "")
+            msg = "[" + ID.value + "] " + message.value;
+        else
+            msg = message.value;
+
+        if (webduinoBroadcastor) {
+            webduinoBroadcastor.send({ topic: sendTopic.value, message: msg });
+            appendMessage("訊息已送出至 " + sendTopic.value + "： " + msg, false);
+            message.value = "";
+        } else {
+            appendMessage("尚未成功連線至伺服器，無法傳送訊息!", true);
+        }
+    }
+
+    // 傳送 on 訊息
+    async function sendOnMessage() {
+        if (sendTopic.value === "") {
+            appendMessage("請輸入傳送主題!", true);
+            return;
+        }
+
+        let msg = "on";
+        if (chkid.checked && ID.value !== "")
+            msg = "[" + ID.value + "] " + msg;
+
+        if (webduinoBroadcastor) {
+            webduinoBroadcastor.send({ topic: sendTopic.value, message: msg });
+            appendMessage("訊息已送出至 " + sendTopic.value + "： " + msg, false);
+        } else {
+            appendMessage("尚未成功連線至伺服器，無法傳送訊息!", true);
+        }
+    }
+
+    // 傳送 off 訊息
+    async function sendOffMessage() {
+        if (sendTopic.value === "") {
+            appendMessage("請輸入傳送主題!", true);
+            return;
+        }
+
+        let msg = "off";
+        if (chkid.checked && ID.value !== "")
+            msg = "[" + ID.value + "] " + msg;
+
+        if (webduinoBroadcastor) {
+            webduinoBroadcastor.send({ topic: sendTopic.value, message: msg });
+            appendMessage("訊息已送出至 " + sendTopic.value + "： " + msg, false);
+        } else {
+            appendMessage("尚未成功連線至伺服器，無法傳送訊息!", true);
+        }
+    }
+
+    function appendMessage(text, isError) {
+        if (clear.checked) {
+            receive.innerHTML = "";
+        }
+        var color = isError ? 'text-danger' : 'text-primary';
+        receive.innerHTML = '<div class="' + color + '"><strong>' + (isError ? '錯誤' : '訊息') + '：</strong> ' + text + '</div>' + receive.innerHTML;
+    }
+
+    setInterval(async function () {
+        if (getTopic.value === "") {
+            return;
+        }
+        if (webduinoBroadcastor) {
+            await webduinoBroadcastor.onMessage(getTopic.value, async (msg) => {
+                if (clear.checked) {
+                    receive.innerHTML = "";
+                }
+                receive.innerHTML = '<div class="text-success"><strong>接收：</strong> ' + msg + '</div>' + receive.innerHTML;
+            });
+        } else {
+            receive.innerHTML = "<div class='text-danger'><strong>錯誤：</strong>連線至伺服器失敗。</div>";
+        }
+    }, 100);
+</script>
+
+<script src="./Webduino MQTT主控台_files/bootstrap.bundle.min.js.下載"></script>
+</body>
+</html>
